@@ -179,7 +179,7 @@
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
         cx = canvas.width / 2;
-        cy = canvas.height / 2 + 150; // Shift horizon down
+        cy = canvas.height * 0.3; // Shift horizon up for overhead view
     }
     window.addEventListener('resize', resize);
     resize();
@@ -188,8 +188,8 @@
      * 3D Projection Configuration
      */
     const FOCAL_LENGTH = 600;
-    const CAMERA_Y = -150; // Camera height above floor
-    const CAMERA_Z = -300; // Camera distance from player
+    const CAMERA_Y = -700; // Camera height high above floor
+    const CAMERA_Z = -400; // Camera distance from player
 
     function project(x, y, z) {
         if (z < CAMERA_Z) return null;
