@@ -207,7 +207,7 @@
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
         cx = canvas.width / 2;
-        cy = canvas.height * 0.4; // Fixed horizon
+        cy = canvas.height * 0.3; // Fixed horizon
     }
     window.addEventListener('resize', resize);
     resize();
@@ -216,8 +216,8 @@
      * Fixed 3D Camera System
      */
     const FOCAL_LENGTH = 600;
-    const CAMERA_Y = -900; // Camera height
-    const CAMERA_Z = -300; // Camera Z position
+    const CAMERA_Y = -500; // Camera height
+    const CAMERA_Z = -500; // Camera Z position
     
     function project(x, y, z) {
         const dx = x;
