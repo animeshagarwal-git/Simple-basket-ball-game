@@ -69,3 +69,20 @@ Below is a recording of the validation gameplay demonstrating the aiming, shooti
 And here is a snapshot showing the detailed side-profile character aiming a shot:
 
 ![Gameplay Screenshot](./assets/screenshot.png)
+
+---
+
+## 5. Minimum System Requirements
+
+Because this application is built entirely with native HTML5 `<canvas>` and vanilla JavaScript, it is extremely lightweight and does not require an active internet connection to run after being downloaded.
+
+- **Operating System**: Any (macOS, Windows, Linux, ChromeOS)
+- **Web Browser**: Any modern web browser with HTML5 Canvas support
+  - Google Chrome (v4.0+)
+  - Mozilla Firefox (v2.0+)
+  - Apple Safari (v3.1+)
+  - Microsoft Edge (v12.0+)
+- **Hardware**: 
+  - **Input**: A physical keyboard (for Left/Right, Up/Down, and Spacebar controls)
+  - **Memory**: Less than 50MB of RAM required.
+  - **CPU/GPU**: Any processor capable of basic 2D hardware acceleration (nearly all devices manufactured after 2010).
