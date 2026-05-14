@@ -3,13 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hoops 3D: Dynamic Basketball</title>
+    <title>Hoops 3D: Pro Court</title>
     <style>
         :root {
-            --primary: #FF5A5F;
-            --secondary: #087E8B;
-            --dark: #121212;
+            --dark: #1A1A1D;
             --light: #F5F5F5;
+            --court: #E6B981;
+            --paint: #2A4B7C;
+            --lines: #F8F9FA;
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -27,7 +28,7 @@
             position: relative;
             width: 100vw;
             height: 100vh;
-            background: linear-gradient(to top, #1e3c72 0%, #2a5298 100%);
+            background: linear-gradient(to top, #111, #222);
             overflow: hidden;
         }
 
@@ -43,11 +44,14 @@
             left: 40px;
             z-index: 10;
             pointer-events: none;
+            display: flex;
+            align-items: flex-start;
+            gap: 40px;
         }
 
         .score-box {
-            background: rgba(0, 0, 0, 0.4);
-            backdrop-filter: blur(8px);
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(10px);
             padding: 15px 25px;
             border-radius: 12px;
             border: 2px solid rgba(255, 255, 255, 0.1);
@@ -55,13 +59,13 @@
             font-weight: 700;
             letter-spacing: 2px;
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-            margin-bottom: 25px;
         }
 
         .score-value {
             color: #06D6A0;
-            font-size: 32px;
+            font-size: 36px;
             margin-left: 10px;
+            text-shadow: 0 0 10px rgba(6, 214, 160, 0.5);
         }
 
         .power-meter-container {
@@ -72,6 +76,7 @@
             border: 2px solid rgba(255, 255, 255, 0.2);
             overflow: hidden;
             position: relative;
+            margin-top: 20px;
         }
 
         .power-bar {
@@ -89,6 +94,28 @@
             font-weight: 700;
             color: #ccc;
             letter-spacing: 1px;
+        }
+
+        #reset-btn {
+            pointer-events: auto;
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 12px 24px;
+            border-radius: 30px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            backdrop-filter: blur(5px);
+            transition: all 0.2s;
+        }
+
+        #reset-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            border-color: white;
+            transform: scale(1.05);
         }
 
         #message-overlay {
@@ -142,21 +169,24 @@
 
 <div id="game-container">
     <div class="hud">
-        <div class="score-box" id="score-container">
-            STREAK <span class="score-value" id="score">0</span>
-        </div>
-        <div style="position: relative;">
-            <div class="power-label">POWER</div>
-            <div class="power-meter-container">
-                <div class="power-bar" id="power-bar"></div>
+        <div>
+            <div class="score-box" id="score-container">
+                STREAK <span class="score-value" id="score">0</span>
+            </div>
+            <div style="position: relative;">
+                <div class="power-label">SHOT POWER</div>
+                <div class="power-meter-container">
+                    <div class="power-bar" id="power-bar"></div>
+                </div>
             </div>
         </div>
+        <button id="reset-btn">Reset Game</button>
     </div>
     
     <div id="message-overlay"></div>
     
     <div class="instructions">
-        <span><span class="key">←</span><span class="key">→</span> Align Shot</span>
+        <span><span class="key">←</span><span class="key">→</span> Orbit Hoop</span>
         <span><span class="key">↑</span><span class="key">↓</span> Adjust Power</span>
         <span><span class="key">SPACE</span> Shoot</span>
     </div>
@@ -166,89 +196,97 @@
 
 <script>
     /**
-     * Engine Setup
+     * DOM Elements & Setup
      */
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
     const scoreEl = document.getElementById('score');
     const powerBarEl = document.getElementById('power-bar');
     const messageEl = document.getElementById('message-overlay');
+    const resetBtn = document.getElementById('reset-btn');
 
     let cx, cy;
     function resize() {
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
         cx = canvas.width / 2;
-        cy = canvas.height * 0.3; // Shift horizon up for overhead view
+        cy = canvas.height * 0.35; // Horizon
     }
     window.addEventListener('resize', resize);
     resize();
 
     /**
-     * 3D Projection Configuration
+     * 3D Orbit Camera System
      */
     const FOCAL_LENGTH = 600;
-    const CAMERA_Y = -700; // Camera height high above floor
-    const CAMERA_Z = -400; // Camera distance from player
-
+    
+    // The camera orbits the origin (the hoop).
+    // The player's position is dictated by 'angle'.
     function project(x, y, z) {
-        if (z < CAMERA_Z) return null;
-        const scale = FOCAL_LENGTH / (FOCAL_LENGTH + z - CAMERA_Z);
+        // World coordinates -> Camera coordinates
+        const camDist = state.orbitRadius + 450;
+        const camX = camDist * Math.sin(state.angle);
+        const camZ = camDist * Math.cos(state.angle);
+        const camY = -700 + state.hoopHeightOffset; // Adjust camera height if hoop height changes
+
+        const dx = x - camX;
+        const dy = y - camY;
+        const dz = z - camZ;
+
+        // Yaw Rotation around Y axis by -angle
+        const vx = dx * Math.cos(state.angle) - dz * Math.sin(state.angle);
+        const vz = -(dx * Math.sin(state.angle) + dz * Math.cos(state.angle));
+
+        if (vz < 50) return null; // Behind camera
+
+        const scale = FOCAL_LENGTH / vz;
         return {
-            x: cx + x * scale,
-            y: cy + (y - CAMERA_Y) * scale,
+            x: cx + vx * scale,
+            y: cy + dy * scale,
             scale: scale,
-            z: z
+            z: vz,
+            vx: vx
         };
     }
 
     /**
-     * Game State & Entities
+     * Game State & Constants
      */
     const state = {
-        phase: 'AIMING', // AIMING, FLYING, RESOLVING
+        phase: 'AIMING',
         streak: 0,
         power: 50,
-        animFrame: 0
+        angle: 0, // 0 is straight on, -pi/2 is left corner, pi/2 is right corner
+        orbitRadius: 800, // Distance to hoop (3 point line)
+        hoopHeightOffset: 0 // Variations in hoop height
     };
 
-    const world = {
-        gravity: 0.8,
-        friction: 0.8,
-        restitution: 0.6
-    };
+    const world = { gravity: 0.9, friction: 0.8, restitution: 0.65 };
 
-    const player = {
-        x: 0, // Moves left/right
-        y: 0, // Floor
-        z: 0,
-        speed: 8,
-        armAngle: 0 // for shooting animation
-    };
+    const player = { armAngle: 0 };
 
     const ball = {
         x: 0, y: 0, z: 0,
         vx: 0, vy: 0, vz: 0,
-        radius: 15,
-        prevX: 0, prevY: 0, prevZ: 0,
+        radius: 14,
         rotation: 0
     };
 
     const basket = {
-        x: 0, // Random left/right
-        y: -300, // Random height
-        z: 800, // Random depth
-        bw: 120, // Backboard width
-        bh: 80,  // Backboard height
+        y: -300, // Base height
+        bw: 140, // Backboard width
+        bh: 90,  // Backboard height
+        zOffset: -40, // Backboard Z offset from origin
         rimRadius: 25,
         rimThickness: 3
     };
 
-    // Particles for visual effects
     let particles = [];
-
     const keys = { ArrowLeft: false, ArrowRight: false, ArrowUp: false, ArrowDown: false, " ": false };
 
+    /**
+     * Input & Events
+     */
     window.addEventListener('keydown', (e) => {
         if (keys.hasOwnProperty(e.key)) {
             keys[e.key] = true;
@@ -258,6 +296,13 @@
 
     window.addEventListener('keyup', (e) => {
         if (keys.hasOwnProperty(e.key)) keys[e.key] = false;
+    });
+
+    resetBtn.addEventListener('click', () => {
+        state.streak = 0;
+        scoreEl.textContent = state.streak;
+        generateNewLayout();
+        resetTurn(true);
     });
 
     function showMessage(text, color, isSuccess) {
@@ -272,42 +317,33 @@
         for (let i = 0; i < count; i++) {
             particles.push({
                 x, y, z,
-                vx: (Math.random() - 0.5) * 15,
-                vy: (Math.random() - 0.5) * 15 - 5,
-                vz: (Math.random() - 0.5) * 15,
-                life: 1.0,
-                color,
-                size: 2 + Math.random() * 5
+                vx: (Math.random() - 0.5) * 20,
+                vy: (Math.random() - 0.5) * 20 - 5,
+                vz: (Math.random() - 0.5) * 20,
+                life: 1.0, color, size: 2 + Math.random() * 5
             });
         }
     }
 
-    function randomizeBasket() {
-        basket.x = (Math.random() - 0.5) * 500; // -250 to 250
-        basket.y = -250 - Math.random() * 150;  // -250 to -400
-        basket.z = 700 + Math.random() * 600;   // 700 to 1300
+    function generateNewLayout() {
+        // Randomize the 3-point line distance (600 to 1100)
+        state.orbitRadius = 600 + Math.random() * 500;
+        // Randomize hoop height (-100 to +100)
+        state.hoopHeightOffset = (Math.random() - 0.5) * 200;
     }
 
-    function resetTurn(missed) {
+    function resetTurn(keepAngle = false) {
         state.phase = 'AIMING';
         ball.vx = 0; ball.vy = 0; ball.vz = 0;
         player.armAngle = 0;
-        if (missed) {
-            state.streak = 0;
-            scoreEl.textContent = state.streak;
-            // Basket remains in same position on miss
-        } else {
-            randomizeBasket();
-        }
-        // Reset player x to 0 to force them to align again
-        player.x = 0;
+        if (!keepAngle) state.angle = (Math.random() - 0.5) * Math.PI * 0.8; // Random starting angle
     }
 
     /**
-     * Logic Update
+     * Game Logic
      */
     function update() {
-        // Update particles
+        // Particles
         for (let i = particles.length - 1; i >= 0; i--) {
             let p = particles[i];
             p.x += p.vx; p.y += p.vy; p.z += p.vz;
@@ -316,13 +352,16 @@
             if (p.life <= 0) particles.splice(i, 1);
         }
 
+        const hoopY = basket.y + state.hoopHeightOffset;
+
         if (state.phase === 'AIMING') {
-            // Player movement
-            if (keys.ArrowLeft) player.x -= player.speed;
-            if (keys.ArrowRight) player.x += player.speed;
+            // Orbit Movement
+            const orbitSpeed = 0.03;
+            if (keys.ArrowLeft) state.angle -= orbitSpeed;
+            if (keys.ArrowRight) state.angle += orbitSpeed;
             
-            // Constrain player
-            player.x = Math.max(-400, Math.min(400, player.x));
+            // Constrain to front hemisphere (-90 to +90 degrees with padding)
+            state.angle = Math.max(-Math.PI/2.2, Math.min(Math.PI/2.2, state.angle));
 
             // Power
             if (keys.ArrowUp) state.power += 1.5;
@@ -334,97 +373,95 @@
             else if (state.power < 75) powerBarEl.style.background = 'linear-gradient(90deg, #FFD3B6, #FFAA6C)';
             else powerBarEl.style.background = 'linear-gradient(90deg, #FF8B94, #FF5A5F)';
 
-            // Hold ball
-            ball.x = player.x + 20; // right hand
-            ball.y = player.y - 120; // chest/head level
-            ball.z = player.z + 10;
+            // Hold ball (Player is at R*sin, 0, R*cos)
+            const px = state.orbitRadius * Math.sin(state.angle);
+            const pz = state.orbitRadius * Math.cos(state.angle);
+            
+            // Ball offset from player center
+            const bxLocal = 25; // right hand
+            const byLocal = -130; // chest height
+            const bzLocal = -10; // slightly in front
+            
+            // Transform local player offset to world space based on angle
+            ball.x = px + bxLocal * Math.cos(state.angle) + bzLocal * Math.sin(state.angle);
+            ball.y = byLocal;
+            ball.z = pz - bxLocal * Math.sin(state.angle) + bzLocal * Math.cos(state.angle);
 
             if (keys[" "]) {
                 state.phase = 'FLYING';
                 
-                // Shoot mechanics: power defines vz and vy
+                // Shoot mechanics
                 const maxZVel = 45;
-                const maxYVel = 30;
+                const maxYVel = 32;
                 
-                // Scale velocities based on power
-                ball.vz = (state.power / 100) * maxZVel;
-                ball.vy = -(state.power / 100) * maxYVel - 5; // Base upward arc
+                const forwardVel = (state.power / 100) * maxZVel;
+                ball.vy = -(state.power / 100) * maxYVel - 6; 
                 
-                // Player shoots straight ahead
-                ball.vx = 0; 
+                // Shoot towards origin (0,0,0)
+                ball.vx = -forwardVel * Math.sin(state.angle);
+                ball.vz = -forwardVel * Math.cos(state.angle);
                 
-                player.armAngle = -Math.PI / 1.5; // Arms up animation
                 keys[" "] = false;
             }
         } else if (state.phase === 'FLYING') {
-            ball.prevX = ball.x;
             ball.prevY = ball.y;
-            ball.prevZ = ball.z;
 
             ball.vy += world.gravity;
             ball.x += ball.vx;
             ball.y += ball.vy;
             ball.z += ball.vz;
-            ball.rotation += 0.2; // Backspin
+            ball.rotation += 0.2;
 
-            // Constants for collision
-            const rimCenterZ = basket.z - basket.rimRadius;
-            const rimY = basket.y + 70; // Position of rim relative to top of backboard
+            // Rim collision center
+            const rimCenterZ = basket.zOffset + basket.rimRadius;
+            const rimY = hoopY + 70;
 
             // Floor collision
             if (ball.y + ball.radius > 0) {
                 ball.y = -ball.radius;
                 ball.vy *= -world.restitution;
+                ball.vx *= world.friction;
                 ball.vz *= world.friction;
                 
-                if (Math.abs(ball.vy) < 2 && Math.abs(ball.vz) < 1) {
-                    // Ball stopped
-                    resolveMiss();
-                }
+                if (Math.abs(ball.vy) < 2 && Math.hypot(ball.vx, ball.vz) < 1) resolveMiss();
             }
 
-            // Backboard collision (Plane at basket.z)
-            if (ball.prevZ + ball.radius <= basket.z && ball.z + ball.radius > basket.z) {
-                // Check X and Y bounds
-                if (Math.abs(ball.x - basket.x) < basket.bw / 2 + ball.radius &&
-                    ball.y > basket.y && ball.y < basket.y + basket.bh + ball.radius) {
-                    ball.z = basket.z - ball.radius;
+            // Backboard collision (Plane at zOffset)
+            const prevZDist = ball.z - ball.vz - basket.zOffset;
+            const currZDist = ball.z - basket.zOffset;
+            
+            if (prevZDist * currZDist < 0) { // Crossed backboard plane
+                if (Math.abs(ball.x) < basket.bw / 2 + ball.radius &&
+                    ball.y > hoopY && ball.y < hoopY + basket.bh + ball.radius) {
+                    ball.z = basket.zOffset + Math.sign(prevZDist) * ball.radius;
                     ball.vz *= -world.restitution;
                     createParticles(ball.x, ball.y, ball.z, '#fff', 5);
                 }
             }
 
-            // Hoop collision logic (simplified 3D ring collision)
-            // Check if ball passes Y plane of hoop
+            // Hoop collision
             if (ball.prevY < rimY && ball.y >= rimY && ball.vy > 0) {
-                // Check distance to center of hoop in XZ plane
-                const distToRimCenter = Math.hypot(ball.x - basket.x, ball.z - rimCenterZ);
-                
-                if (distToRimCenter < basket.rimRadius - ball.radius + 5) {
-                    // SWISH!
+                const distToCenter = Math.hypot(ball.x, ball.z - rimCenterZ);
+                if (distToCenter < basket.rimRadius - ball.radius + 3) {
                     scoreGoal();
-                } else if (distToRimCenter < basket.rimRadius + ball.radius + 5) {
-                    // Hit the rim - bounce out
-                    const nx = (ball.x - basket.x) / distToRimCenter;
-                    const nz = (ball.z - rimCenterZ) / distToRimCenter;
+                } else if (distToCenter < basket.rimRadius + ball.radius + 5) {
+                    // Bounce
+                    const nx = ball.x / distToCenter;
+                    const nz = (ball.z - rimCenterZ) / distToCenter;
                     
-                    // Push out
-                    ball.x = basket.x + nx * (basket.rimRadius + ball.radius);
+                    ball.x = nx * (basket.rimRadius + ball.radius);
                     ball.z = rimCenterZ + nz * (basket.rimRadius + ball.radius);
                     
-                    // Deflect velocities
                     const dot = ball.vx * nx + ball.vz * nz;
                     ball.vx -= 2 * dot * nx * world.restitution;
                     ball.vz -= 2 * dot * nz * world.restitution;
-                    ball.vy *= -world.restitution * 0.8; // Bounce up
+                    ball.vy *= -world.restitution * 0.8;
                     createParticles(ball.x, rimY, ball.z, '#E63946', 8);
                 }
             }
 
-            // Wall/OutOfBounds collision
-            if (ball.z > 2500 || ball.x > 1000 || ball.x < -1000) {
-                resolveMiss();
-            }
+            // Out of bounds
+            if (Math.hypot(ball.x, ball.z) > 2500) resolveMiss();
         }
     }
 
@@ -434,216 +471,237 @@
         state.streak += 1;
         scoreEl.textContent = state.streak;
         showMessage("SWISH!", "#06D6A0", true);
-        createParticles(basket.x, basket.y + 80, basket.z - basket.rimRadius, '#F77F00', 40);
+        const rimZ = basket.zOffset + basket.rimRadius;
+        createParticles(0, basket.y + state.hoopHeightOffset + 80, rimZ, '#F77F00', 40);
         
         setTimeout(() => {
-            resetTurn(false);
+            generateNewLayout(); // Change geometry on score
+            resetTurn();
         }, 2000);
     }
 
     function resolveMiss() {
         if (state.phase === 'RESOLVING') return;
         state.phase = 'RESOLVING';
+        state.streak = 0;
+        scoreEl.textContent = state.streak;
         showMessage("MISSED", "#EF476F", false);
         
         setTimeout(() => {
-            resetTurn(true);
+            resetTurn(true); // Keep same angle and layout on miss
         }, 2000);
     }
 
     /**
      * Rendering
      */
-    function drawFloor() {
-        // Perspective grid lines to show depth
-        ctx.strokeStyle = 'rgba(255,255,255,0.1)';
-        ctx.lineWidth = 2;
-        
-        // Vertical lines
-        for (let x = -1000; x <= 1000; x += 200) {
-            const p1 = project(x, 0, 0);
-            const p2 = project(x, 0, 3000);
-            if(p1 && p2) {
-                ctx.beginPath();
-                ctx.moveTo(p1.x, p1.y);
-                ctx.lineTo(p2.x, p2.y);
-                ctx.stroke();
-            }
-        }
-        
-        // Horizontal lines
-        for (let z = 0; z <= 3000; z += 300) {
-            const p1 = project(-1000, 0, z);
-            const p2 = project(1000, 0, z);
-            if(p1 && p2) {
-                ctx.beginPath();
-                ctx.moveTo(p1.x, p1.y);
-                ctx.lineTo(p2.x, p2.y);
-                ctx.stroke();
-            }
+    function drawLine(x1, z1, x2, z2, color, width) {
+        const p1 = project(x1, 0, z1);
+        const p2 = project(x2, 0, z2);
+        if (p1 && p2) {
+            ctx.strokeStyle = color;
+            ctx.lineWidth = width * ((p1.scale + p2.scale) / 2);
+            ctx.beginPath();
+            ctx.moveTo(p1.x, p1.y);
+            ctx.lineTo(p2.x, p2.y);
+            ctx.stroke();
         }
     }
 
+    function drawCourtFloor() {
+        // Hardwood background
+        ctx.fillStyle = '#C28F59'; // Wood color
+        
+        // Draw a giant polygon for the visible floor
+        const farLeft = project(-2000, 0, -500);
+        const farRight = project(2000, 0, -500);
+        const nearRight = project(2000, 0, 3000);
+        const nearLeft = project(-2000, 0, 3000);
+
+        if (farLeft && farRight && nearRight && nearLeft) {
+            ctx.beginPath();
+            ctx.moveTo(farLeft.x, farLeft.y);
+            ctx.lineTo(farRight.x, farRight.y);
+            ctx.lineTo(nearRight.x, nearRight.y);
+            ctx.lineTo(nearLeft.x, nearLeft.y);
+            ctx.fill();
+        }
+
+        const lColor = 'rgba(255,255,255,0.8)';
+        
+        // Baseline
+        drawLine(-1000, 0, 1000, 0, lColor, 5);
+        
+        // Paint (Key)
+        const paintWidth = 320;
+        const paintLength = 580;
+        
+        // Paint Fill
+        ctx.fillStyle = '#2A4B7C';
+        const pl = project(-paintWidth/2, 0, 0);
+        const pr = project(paintWidth/2, 0, 0);
+        const pfr = project(paintWidth/2, 0, paintLength);
+        const pfl = project(-paintWidth/2, 0, paintLength);
+        
+        if (pl && pr && pfr && pfl) {
+            ctx.beginPath();
+            ctx.moveTo(pl.x, pl.y);
+            ctx.lineTo(pr.x, pr.y);
+            ctx.lineTo(pfr.x, pfr.y);
+            ctx.lineTo(pfl.x, pfl.y);
+            ctx.fill();
+        }
+
+        // Paint Lines
+        drawLine(-paintWidth/2, 0, -paintWidth/2, paintLength, lColor, 5);
+        drawLine(paintWidth/2, 0, paintWidth/2, paintLength, lColor, 5);
+        drawLine(-paintWidth/2, paintLength, paintWidth/2, paintLength, lColor, 5); // Free throw line
+
+        // Free Throw Circle
+        drawCircle(0, paintLength, 150, lColor, 5, true);
+
+        // 3-Point Arc (Semicircle)
+        drawCircle(0, 0, state.orbitRadius, lColor, 5, false, true);
+    }
+
+    function drawCircle(x, z, r, color, width, full = false, is3Pt = false) {
+        ctx.strokeStyle = color;
+        ctx.beginPath();
+        let started = false;
+        
+        // For 3pt line, it has straight sides at the corners
+        const startAng = is3Pt ? -Math.PI/2.2 : 0;
+        const endAng = is3Pt ? Math.PI/2.2 : Math.PI*2;
+        
+        if (is3Pt) {
+            const cornerX = r * Math.sin(-Math.PI/2.2);
+            drawLine(cornerX, 0, cornerX, r * Math.cos(-Math.PI/2.2), color, width);
+            const cornerX2 = r * Math.sin(Math.PI/2.2);
+            drawLine(cornerX2, 0, cornerX2, r * Math.cos(Math.PI/2.2), color, width);
+        }
+
+        for (let a = startAng; a <= endAng; a += 0.1) {
+            const px = x + r * Math.sin(a);
+            const pz = z + r * Math.cos(a);
+            const p = project(px, 0, pz);
+            if (p) {
+                if (!started) { ctx.moveTo(p.x, p.y); started = true; }
+                else { ctx.lineTo(p.x, p.y); }
+                ctx.lineWidth = width * p.scale;
+            }
+        }
+        ctx.stroke();
+    }
+
     function drawBasket() {
-        const backP = project(basket.x, basket.y, basket.z);
-        if (!backP) return; // Behind camera
+        const hoopY = basket.y + state.hoopHeightOffset;
+        const backP = project(0, hoopY, basket.zOffset);
+        if (!backP) return;
 
         // Pole
-        const poleBottom = project(basket.x, 0, basket.z + 10);
-        if (poleBottom) {
-            ctx.fillStyle = '#4A4E69';
+        const poleTop = project(0, hoopY + basket.bh, basket.zOffset + 20);
+        const poleBottom = project(0, 0, basket.zOffset + 20);
+        if (poleTop && poleBottom) {
+            ctx.strokeStyle = '#4A4E69';
+            ctx.lineWidth = 15 * poleBottom.scale;
             ctx.beginPath();
-            ctx.moveTo(backP.x - 5 * backP.scale, backP.y);
-            ctx.lineTo(backP.x + 5 * backP.scale, backP.y);
-            ctx.lineTo(poleBottom.x + 10 * poleBottom.scale, poleBottom.y);
-            ctx.lineTo(poleBottom.x - 10 * poleBottom.scale, poleBottom.y);
-            ctx.fill();
+            ctx.moveTo(poleTop.x, poleTop.y);
+            ctx.lineTo(poleBottom.x, poleBottom.y);
+            ctx.stroke();
         }
 
         // Backboard
         const hw = (basket.bw / 2) * backP.scale;
         const hh = basket.bh * backP.scale;
         
-        // Board background
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
         ctx.fillRect(backP.x - hw, backP.y, hw * 2, hh);
-        
-        // Board border
         ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 3 * backP.scale;
+        ctx.lineWidth = 4 * backP.scale;
         ctx.strokeRect(backP.x - hw, backP.y, hw * 2, hh);
         
-        // Inner square
+        // Inner Square
         ctx.strokeStyle = '#E63946';
-        ctx.strokeRect(backP.x - hw * 0.4, backP.y + hh * 0.5, hw * 0.8, hh * 0.4);
+        ctx.strokeRect(backP.x - hw * 0.4, backP.y + hh * 0.5, hw * 0.8, hh * 0.35);
 
-        // Hoop
-        const rimZ = basket.z - basket.rimRadius;
-        const rimY = basket.y + 70;
+        // Hoop and Net
+        const rimZ = basket.zOffset + basket.rimRadius;
+        const rimY = hoopY + 70;
         
-        // Front and back of hoop for drawing order
-        const rimBackP = project(basket.x, rimY, basket.z);
-        const rimFrontP = project(basket.x, rimY, basket.z - basket.rimRadius * 2);
-        const rimLeftP = project(basket.x - basket.rimRadius, rimY, rimZ);
-        const rimRightP = project(basket.x + basket.rimRadius, rimY, rimZ);
+        const rimBack = project(0, rimY, basket.zOffset);
+        const rimFront = project(0, rimY, basket.zOffset + basket.rimRadius * 2);
+        const rimLeft = project(-basket.rimRadius, rimY, rimZ);
+        const rimRight = project(basket.rimRadius, rimY, rimZ);
 
-        if (rimFrontP && rimBackP && rimLeftP && rimRightP) {
-            // Calculate projected ellipse dimensions roughly
-            const rx = (rimRightP.x - rimLeftP.x) / 2;
-            const ry = (rimFrontP.y - rimBackP.y) / 2;
-            const cy = rimBackP.y + ry;
+        if (rimFront && rimBack && rimLeft && rimRight) {
+            const rx = (rimRight.x - rimLeft.x) / 2;
+            const ry = (rimFront.y - rimBack.y) / 2;
+            const cy_rim = rimBack.y + ry;
 
             // Net
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
-            ctx.lineWidth = 1;
-            const netBottomP = project(basket.x, rimY + 60, rimZ);
-            if (netBottomP) {
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+            ctx.lineWidth = 1.5;
+            const netBottom = project(0, rimY + 50, rimZ);
+            if (netBottom) {
                 ctx.beginPath();
-                // Draw V shape for net
-                ctx.moveTo(rimLeftP.x, rimLeftP.y);
-                ctx.lineTo(netBottomP.x - 5*netBottomP.scale, netBottomP.y);
-                ctx.lineTo(rimRightP.x, rimRightP.y);
-                
-                ctx.moveTo(rimBackP.x, rimBackP.y);
-                ctx.lineTo(netBottomP.x, netBottomP.y);
-                ctx.lineTo(rimFrontP.x, rimFrontP.y);
+                ctx.moveTo(rimLeft.x, rimLeft.y); ctx.lineTo(netBottom.x - 10*netBottom.scale, netBottom.y); ctx.lineTo(rimRight.x, rimRight.y);
+                ctx.moveTo(rimBack.x, rimBack.y); ctx.lineTo(netBottom.x, netBottom.y); ctx.lineTo(rimFront.x, rimFront.y);
                 ctx.stroke();
             }
 
-            // Rim Ellipse
+            // Rim
             ctx.strokeStyle = '#E63946';
-            ctx.lineWidth = basket.rimThickness * 2 * rimFrontP.scale;
+            ctx.lineWidth = basket.rimThickness * 2 * rimFront.scale;
             ctx.beginPath();
-            ctx.ellipse(basket.x * rimFrontP.scale + cx, cy, rx, Math.abs(ry), 0, 0, Math.PI * 2);
+            ctx.ellipse(rimFront.x - rimFront.vx*rimFront.scale, cy_rim, Math.abs(rx), Math.abs(ry), 0, 0, Math.PI * 2);
             ctx.stroke();
         }
     }
 
-    function drawDetailedPlayer() {
-        const p = project(player.x, player.y, player.z);
+    function drawPlayer() {
+        const px = state.orbitRadius * Math.sin(state.angle);
+        const pz = state.orbitRadius * Math.cos(state.angle);
+        const p = project(px, 0, pz);
         if (!p) return;
 
-        const scale = p.scale;
-        
         ctx.save();
         ctx.translate(p.x, p.y);
-        ctx.scale(scale, scale);
+        ctx.scale(p.scale, p.scale);
 
-        // Character seen from behind
-        // Colors
-        const skin = '#8D5524';
-        const jersey = '#FFD166';
-        const shorts = '#118AB2';
-        const shoes = '#fff';
+        const skin = '#8D5524', jersey = '#FFD166', shorts = '#118AB2', shoes = '#fff';
 
         // Legs
         ctx.fillStyle = skin;
-        ctx.fillRect(-15, -60, 10, 60); // Left leg
-        ctx.fillRect(5, -60, 10, 60);  // Right leg
+        ctx.fillRect(-15, -60, 10, 60); ctx.fillRect(5, -60, 10, 60);
 
-        // Shorts
+        // Shorts & Torso
         ctx.fillStyle = shorts;
-        ctx.fillRect(-20, -100, 18, 50); // Left short
-        ctx.fillRect(-2, -100, 18, 50);  // Right short
-        ctx.fillRect(-20, -110, 36, 20); // Hips
-
-        // Jersey (Torso)
-        ctx.fillStyle = jersey;
-        ctx.beginPath();
-        ctx.moveTo(-22, -110); // bottom left
-        ctx.lineTo(18, -110);  // bottom right
-        ctx.lineTo(15, -170);  // shoulder right
-        ctx.lineTo(-19, -170); // shoulder left
-        ctx.fill();
+        ctx.fillRect(-20, -100, 18, 50); ctx.fillRect(-2, -100, 18, 50); ctx.fillRect(-20, -110, 36, 20);
         
-        // Jersey Number
-        ctx.fillStyle = '#EF476F';
-        ctx.font = 'bold 30px Arial';
-        ctx.textAlign = 'center';
-        ctx.fillText('23', -2, -125);
+        ctx.fillStyle = jersey;
+        ctx.beginPath(); ctx.moveTo(-22, -110); ctx.lineTo(18, -110); ctx.lineTo(15, -170); ctx.lineTo(-19, -170); ctx.fill();
+        
+        ctx.fillStyle = '#EF476F'; ctx.font = 'bold 30px Arial'; ctx.textAlign = 'center'; ctx.fillText('23', -2, -125);
 
         // Head
         ctx.fillStyle = skin;
-        ctx.beginPath();
-        ctx.arc(-2, -185, 15, 0, Math.PI * 2);
-        ctx.fill();
-        
-        // Headband
-        ctx.fillStyle = '#fff';
-        ctx.fillRect(-16, -195, 28, 5);
+        ctx.beginPath(); ctx.arc(-2, -185, 15, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#fff'; ctx.fillRect(-16, -195, 28, 5); // Headband
 
-        // Arms (Dynamic based on shooting)
-        ctx.strokeStyle = skin;
-        ctx.lineWidth = 10;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        
+        // Arms
+        ctx.strokeStyle = skin; ctx.lineWidth = 10; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
         ctx.beginPath();
         if (state.phase === 'AIMING') {
-            // Holding ball in front
-            ctx.moveTo(-18, -165); // Left shoulder
-            ctx.lineTo(-30, -130); // Left elbow
-            ctx.lineTo(-5, -120);  // Left hand towards middle
-            
-            ctx.moveTo(14, -165);  // Right shoulder
-            ctx.lineTo(26, -130);  // Right elbow
-            ctx.lineTo(10, -120);  // Right hand towards middle
+            ctx.moveTo(-18, -165); ctx.lineTo(-30, -130); ctx.lineTo(-5, -120);
+            ctx.moveTo(14, -165); ctx.lineTo(26, -130); ctx.lineTo(10, -120);
         } else {
-            // Shot follow through (arms up)
-            ctx.moveTo(-18, -165);
-            ctx.lineTo(-10, -220); // Left arm up
-            
-            ctx.moveTo(14, -165);
-            ctx.lineTo(5, -220);   // Right arm up
+            ctx.moveTo(-18, -165); ctx.lineTo(-10, -220);
+            ctx.moveTo(14, -165); ctx.lineTo(5, -220);
         }
         ctx.stroke();
 
-        // Shoes
         ctx.fillStyle = shoes;
-        ctx.beginPath();
-        ctx.ellipse(-10, -5, 12, 6, 0, 0, Math.PI*2);
-        ctx.ellipse(10, -5, 12, 6, 0, 0, Math.PI*2);
-        ctx.fill();
+        ctx.beginPath(); ctx.ellipse(-10, -5, 12, 6, 0, 0, Math.PI*2); ctx.ellipse(10, -5, 12, 6, 0, 0, Math.PI*2); ctx.fill();
 
         ctx.restore();
     }
@@ -652,58 +710,28 @@
         const p = project(ball.x, ball.y, ball.z);
         if (!p) return;
 
-        const scaledRadius = ball.radius * p.scale;
-        
-        ctx.save();
-        ctx.translate(p.x, p.y);
-        ctx.rotate(ball.rotation);
+        const sr = ball.radius * p.scale;
+        ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(ball.rotation);
 
-        // Base color
         ctx.fillStyle = '#F77F00';
-        ctx.beginPath();
-        ctx.arc(0, 0, scaledRadius, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.beginPath(); ctx.arc(0, 0, sr, 0, Math.PI * 2); ctx.fill();
 
-        // Lines
-        ctx.strokeStyle = '#2B2D42';
-        ctx.lineWidth = Math.max(1, 1.5 * p.scale);
+        ctx.strokeStyle = '#2B2D42'; ctx.lineWidth = Math.max(1, 1.5 * p.scale);
+        ctx.beginPath(); ctx.moveTo(0, -sr); ctx.lineTo(0, sr); ctx.moveTo(-sr, 0); ctx.lineTo(sr, 0); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(-sr*0.7, -sr*0.7); ctx.quadraticCurveTo(0, 0, -sr*0.7, sr*0.7); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(sr*0.7, -sr*0.7); ctx.quadraticCurveTo(0, 0, sr*0.7, sr*0.7); ctx.stroke();
         
-        ctx.beginPath();
-        ctx.moveTo(0, -scaledRadius);
-        ctx.lineTo(0, scaledRadius);
-        ctx.moveTo(-scaledRadius, 0);
-        ctx.lineTo(scaledRadius, 0);
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.moveTo(-scaledRadius * 0.7, -scaledRadius * 0.7);
-        ctx.quadraticCurveTo(0, 0, -scaledRadius * 0.7, scaledRadius * 0.7);
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.moveTo(scaledRadius * 0.7, -scaledRadius * 0.7);
-        ctx.quadraticCurveTo(0, 0, scaledRadius * 0.7, scaledRadius * 0.7);
-        ctx.stroke();
-        
-        // Shading
-        const grad = ctx.createRadialGradient(-scaledRadius/3, -scaledRadius/3, 1, 0, 0, scaledRadius);
-        grad.addColorStop(0, 'rgba(255,255,255,0.3)');
-        grad.addColorStop(1, 'rgba(0,0,0,0.5)');
-        ctx.fillStyle = grad;
-        ctx.beginPath();
-        ctx.arc(0, 0, scaledRadius, 0, Math.PI * 2);
-        ctx.fill();
-
+        const grad = ctx.createRadialGradient(-sr/3, -sr/3, 1, 0, 0, sr);
+        grad.addColorStop(0, 'rgba(255,255,255,0.3)'); grad.addColorStop(1, 'rgba(0,0,0,0.5)');
+        ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(0, 0, sr, 0, Math.PI * 2); ctx.fill();
         ctx.restore();
 
-        // Shadow on the floor
-        if (ball.y < 0 && ball.z > 0) {
-            const shadowP = project(ball.x, 0, ball.z);
-            if (shadowP) {
-                ctx.fillStyle = 'rgba(0,0,0,0.4)';
-                ctx.beginPath();
-                ctx.ellipse(shadowP.x, shadowP.y, scaledRadius * 1.5, scaledRadius * 0.5, 0, 0, Math.PI * 2);
-                ctx.fill();
+        // Shadow
+        if (ball.y < 0) {
+            const sp = project(ball.x, 0, ball.z);
+            if (sp) {
+                ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.beginPath();
+                ctx.ellipse(sp.x, sp.y, sr*1.5, sr*0.5, 0, 0, Math.PI*2); ctx.fill();
             }
         }
     }
@@ -711,73 +739,51 @@
     function drawTrajectoryGuide() {
         if (state.phase !== 'AIMING') return;
 
-        ctx.beginPath();
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
-        ctx.lineWidth = 2;
-        ctx.setLineDash([5, 5]);
+        ctx.beginPath(); ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)'; ctx.lineWidth = 2; ctx.setLineDash([5, 5]);
 
-        let tx = ball.x;
-        let ty = ball.y;
-        let tz = ball.z;
-        
-        const maxZVel = 45;
-        const maxYVel = 30;
-        let tvz = (state.power / 100) * maxZVel;
-        let tvy = -(state.power / 100) * maxYVel - 5;
+        let tx = ball.x, ty = ball.y, tz = ball.z;
+        const forwardVel = (state.power / 100) * 45;
+        let tvy = -(state.power / 100) * 32 - 6;
+        let tvx = -forwardVel * Math.sin(state.angle);
+        let tvz = -forwardVel * Math.cos(state.angle);
         
         const pStart = project(tx, ty, tz);
         if(pStart) ctx.moveTo(pStart.x, pStart.y);
 
         for (let i = 0; i < 40; i++) {
-            tvy += world.gravity;
-            tx += 0; // vx is 0
-            ty += tvy;
-            tz += tvz;
-            
+            tvy += world.gravity; tx += tvx; ty += tvy; tz += tvz;
             const p = project(tx, ty, tz);
-            if (p) {
-                ctx.lineTo(p.x, p.y);
-            }
+            if (p) ctx.lineTo(p.x, p.y);
             if (ty > 0) break;
         }
-        ctx.stroke();
-        ctx.setLineDash([]);
+        ctx.stroke(); ctx.setLineDash([]);
     }
 
     function drawParticles() {
         particles.forEach(p => {
             const proj = project(p.x, p.y, p.z);
             if(proj) {
-                ctx.globalAlpha = p.life;
-                ctx.fillStyle = p.color;
-                ctx.beginPath();
-                ctx.arc(proj.x, proj.y, p.size * proj.scale, 0, Math.PI * 2);
-                ctx.fill();
+                ctx.globalAlpha = p.life; ctx.fillStyle = p.color;
+                ctx.beginPath(); ctx.arc(proj.x, proj.y, p.size * proj.scale, 0, Math.PI * 2); ctx.fill();
             }
         });
         ctx.globalAlpha = 1.0;
     }
 
     function render() {
-        // Clear background with slight fade for motion blur
-        ctx.fillStyle = 'rgba(30, 60, 114, 0.5)'; // Matching gradient base
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-        // Sorting rendering order by Z-depth (Painter's algorithm)
-        drawFloor();
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        drawCourtFloor();
         
         const entities = [
-            { id: 'player', z: player.z, draw: drawDetailedPlayer },
-            { id: 'basket', z: basket.z, draw: drawBasket },
-            { id: 'ball', z: ball.z, draw: drawBall }
+            { z: project(state.orbitRadius * Math.sin(state.angle), 0, state.orbitRadius * Math.cos(state.angle))?.z || 0, draw: drawPlayer },
+            { z: project(0, basket.y, basket.zOffset)?.z || 0, draw: drawBasket },
+            { z: project(ball.x, ball.y, ball.z)?.z || 0, draw: drawBall }
         ];
 
-        // Sort ascending by Z (farthest first)
         entities.sort((a, b) => b.z - a.z);
 
-        // Trajectory is drawn behind entities if aiming
         if (state.phase === 'AIMING') drawTrajectoryGuide();
-
         entities.forEach(ent => ent.draw());
         drawParticles();
     }
@@ -789,7 +795,7 @@
     }
 
     // Init
-    randomizeBasket();
+    resetTurn();
     requestAnimationFrame(loop);
 
 </script>
