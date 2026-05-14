@@ -3,14 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hoops 3D: Pro Court</title>
+    <title>Hoops 3D: Fixed Perspective</title>
     <style>
         :root {
             --dark: #1A1A1D;
             --light: #F5F5F5;
-            --court: #E6B981;
-            --paint: #2A4B7C;
-            --lines: #F8F9FA;
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -186,7 +183,7 @@
     <div id="message-overlay"></div>
     
     <div class="instructions">
-        <span><span class="key">←</span><span class="key">→</span> Orbit Hoop</span>
+        <span><span class="key">←</span><span class="key">→</span> Move along 3PT Line</span>
         <span><span class="key">↑</span><span class="key">↓</span> Adjust Power</span>
         <span><span class="key">SPACE</span> Shoot</span>
     </div>
@@ -210,42 +207,31 @@
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
         cx = canvas.width / 2;
-        cy = canvas.height * 0.35; // Horizon
+        cy = canvas.height * 0.4; // Fixed horizon
     }
     window.addEventListener('resize', resize);
     resize();
 
     /**
-     * 3D Orbit Camera System
+     * Fixed 3D Camera System
      */
     const FOCAL_LENGTH = 600;
+    const CAMERA_Y = -900; // Camera height
+    const CAMERA_Z = -300; // Camera Z position
     
-    // The camera orbits the origin (the hoop).
-    // The player's position is dictated by 'angle'.
     function project(x, y, z) {
-        // World coordinates -> Camera coordinates
-        const camDist = state.orbitRadius + 450;
-        const camX = camDist * Math.sin(state.angle);
-        const camZ = camDist * Math.cos(state.angle);
-        const camY = -700 + state.hoopHeightOffset; // Adjust camera height if hoop height changes
+        const dx = x;
+        const dy = y - CAMERA_Y;
+        const dz = z - CAMERA_Z;
 
-        const dx = x - camX;
-        const dy = y - camY;
-        const dz = z - camZ;
+        if (dz < 50) return null; // Behind camera
 
-        // Yaw Rotation around Y axis by -angle
-        const vx = dx * Math.cos(state.angle) - dz * Math.sin(state.angle);
-        const vz = -(dx * Math.sin(state.angle) + dz * Math.cos(state.angle));
-
-        if (vz < 50) return null; // Behind camera
-
-        const scale = FOCAL_LENGTH / vz;
+        const scale = FOCAL_LENGTH / dz;
         return {
-            x: cx + vx * scale,
+            x: cx + dx * scale,
             y: cy + dy * scale,
             scale: scale,
-            z: vz,
-            vx: vx
+            z: dz
         };
     }
 
@@ -256,27 +242,24 @@
         phase: 'AIMING',
         streak: 0,
         power: 50,
-        angle: 0, // 0 is straight on, -pi/2 is left corner, pi/2 is right corner
-        orbitRadius: 800, // Distance to hoop (3 point line)
-        hoopHeightOffset: 0 // Variations in hoop height
+        angle: 0, // Player position on the semicircle
+        orbitRadius: 700 // Distance to hoop (3 point line)
     };
 
     const world = { gravity: 0.9, friction: 0.8, restitution: 0.65 };
 
-    const player = { armAngle: 0 };
-
     const ball = {
         x: 0, y: 0, z: 0,
         vx: 0, vy: 0, vz: 0,
-        radius: 14,
-        rotation: 0
+        radius: 14, rotation: 0
     };
 
     const basket = {
-        y: -300, // Base height
+        y: -300, // Fixed height
+        z: 800,  // Fixed world position
         bw: 140, // Backboard width
         bh: 90,  // Backboard height
-        zOffset: -40, // Backboard Z offset from origin
+        zOffset: 0, // Rim offset from backboard
         rimRadius: 25,
         rimThickness: 3
     };
@@ -284,9 +267,6 @@
     let particles = [];
     const keys = { ArrowLeft: false, ArrowRight: false, ArrowUp: false, ArrowDown: false, " ": false };
 
-    /**
-     * Input & Events
-     */
     window.addEventListener('keydown', (e) => {
         if (keys.hasOwnProperty(e.key)) {
             keys[e.key] = true;
@@ -301,11 +281,10 @@
     resetBtn.addEventListener('click', () => {
         state.streak = 0;
         scoreEl.textContent = state.streak;
-        generateNewLayout();
-        resetTurn(true);
+        resetTurn();
     });
 
-    function showMessage(text, color, isSuccess) {
+    function showMessage(text, color) {
         messageEl.textContent = text;
         messageEl.style.color = color;
         messageEl.style.textShadow = `0 10px 30px ${color}88, 0 5px 15px rgba(0,0,0,0.8)`;
@@ -325,18 +304,10 @@
         }
     }
 
-    function generateNewLayout() {
-        // Randomize the 3-point line distance (600 to 1100)
-        state.orbitRadius = 600 + Math.random() * 500;
-        // Randomize hoop height (-100 to +100)
-        state.hoopHeightOffset = (Math.random() - 0.5) * 200;
-    }
-
-    function resetTurn(keepAngle = false) {
+    function resetTurn() {
         state.phase = 'AIMING';
         ball.vx = 0; ball.vy = 0; ball.vz = 0;
-        player.armAngle = 0;
-        if (!keepAngle) state.angle = (Math.random() - 0.5) * Math.PI * 0.8; // Random starting angle
+        state.angle = (Math.random() - 0.5) * Math.PI * 0.9; // Random starting angle on the arc
     }
 
     /**
@@ -352,16 +323,17 @@
             if (p.life <= 0) particles.splice(i, 1);
         }
 
-        const hoopY = basket.y + state.hoopHeightOffset;
+        const px = state.orbitRadius * Math.sin(state.angle);
+        const pz = basket.z - state.orbitRadius * Math.cos(state.angle);
 
         if (state.phase === 'AIMING') {
-            // Orbit Movement
+            // Move Player along fixed arc
             const orbitSpeed = 0.03;
             if (keys.ArrowLeft) state.angle -= orbitSpeed;
             if (keys.ArrowRight) state.angle += orbitSpeed;
             
-            // Constrain to front hemisphere (-90 to +90 degrees with padding)
-            state.angle = Math.max(-Math.PI/2.2, Math.min(Math.PI/2.2, state.angle));
+            // Constrain angle (-pi/2 to pi/2)
+            state.angle = Math.max(-Math.PI/2, Math.min(Math.PI/2, state.angle));
 
             // Power
             if (keys.ArrowUp) state.power += 1.5;
@@ -373,38 +345,29 @@
             else if (state.power < 75) powerBarEl.style.background = 'linear-gradient(90deg, #FFD3B6, #FFAA6C)';
             else powerBarEl.style.background = 'linear-gradient(90deg, #FF8B94, #FF5A5F)';
 
-            // Hold ball (Player is at R*sin, 0, R*cos)
-            const px = state.orbitRadius * Math.sin(state.angle);
-            const pz = state.orbitRadius * Math.cos(state.angle);
-            
-            // Ball offset from player center
-            const bxLocal = 25; // right hand
-            const byLocal = -130; // chest height
-            const bzLocal = -10; // slightly in front
-            
-            // Transform local player offset to world space based on angle
-            ball.x = px + bxLocal * Math.cos(state.angle) + bzLocal * Math.sin(state.angle);
-            ball.y = byLocal;
-            ball.z = pz - bxLocal * Math.sin(state.angle) + bzLocal * Math.cos(state.angle);
+            // Hold ball slightly in front of player
+            ball.x = px - 25 * Math.sin(state.angle);
+            ball.y = -100; // Chest height
+            ball.z = pz + 25 * Math.cos(state.angle);
 
             if (keys[" "]) {
                 state.phase = 'FLYING';
                 
-                // Shoot mechanics
                 const maxZVel = 45;
                 const maxYVel = 32;
                 
                 const forwardVel = (state.power / 100) * maxZVel;
                 ball.vy = -(state.power / 100) * maxYVel - 6; 
                 
-                // Shoot towards origin (0,0,0)
+                // Shoot towards hoop (0, basket.z)
                 ball.vx = -forwardVel * Math.sin(state.angle);
-                ball.vz = -forwardVel * Math.cos(state.angle);
+                ball.vz = forwardVel * Math.cos(state.angle);
                 
                 keys[" "] = false;
             }
         } else if (state.phase === 'FLYING') {
             ball.prevY = ball.y;
+            ball.prevZ = ball.z;
 
             ball.vy += world.gravity;
             ball.x += ball.vx;
@@ -412,9 +375,8 @@
             ball.z += ball.vz;
             ball.rotation += 0.2;
 
-            // Rim collision center
-            const rimCenterZ = basket.zOffset + basket.rimRadius;
-            const rimY = hoopY + 70;
+            const rimCenterZ = basket.z - basket.rimRadius;
+            const rimY = basket.y + 70;
 
             // Floor collision
             if (ball.y + ball.radius > 0) {
@@ -422,18 +384,14 @@
                 ball.vy *= -world.restitution;
                 ball.vx *= world.friction;
                 ball.vz *= world.friction;
-                
                 if (Math.abs(ball.vy) < 2 && Math.hypot(ball.vx, ball.vz) < 1) resolveMiss();
             }
 
-            // Backboard collision (Plane at zOffset)
-            const prevZDist = ball.z - ball.vz - basket.zOffset;
-            const currZDist = ball.z - basket.zOffset;
-            
-            if (prevZDist * currZDist < 0) { // Crossed backboard plane
+            // Backboard collision (Plane at basket.z)
+            if (ball.prevZ + ball.radius <= basket.z && ball.z + ball.radius > basket.z) {
                 if (Math.abs(ball.x) < basket.bw / 2 + ball.radius &&
-                    ball.y > hoopY && ball.y < hoopY + basket.bh + ball.radius) {
-                    ball.z = basket.zOffset + Math.sign(prevZDist) * ball.radius;
+                    ball.y > basket.y && ball.y < basket.y + basket.bh + ball.radius) {
+                    ball.z = basket.z - ball.radius;
                     ball.vz *= -world.restitution;
                     createParticles(ball.x, ball.y, ball.z, '#fff', 5);
                 }
@@ -445,7 +403,6 @@
                 if (distToCenter < basket.rimRadius - ball.radius + 3) {
                     scoreGoal();
                 } else if (distToCenter < basket.rimRadius + ball.radius + 5) {
-                    // Bounce
                     const nx = ball.x / distToCenter;
                     const nz = (ball.z - rimCenterZ) / distToCenter;
                     
@@ -461,7 +418,7 @@
             }
 
             // Out of bounds
-            if (Math.hypot(ball.x, ball.z) > 2500) resolveMiss();
+            if (Math.hypot(ball.x, ball.z - basket.z) > 1500) resolveMiss();
         }
     }
 
@@ -470,14 +427,9 @@
         state.phase = 'RESOLVING';
         state.streak += 1;
         scoreEl.textContent = state.streak;
-        showMessage("SWISH!", "#06D6A0", true);
-        const rimZ = basket.zOffset + basket.rimRadius;
-        createParticles(0, basket.y + state.hoopHeightOffset + 80, rimZ, '#F77F00', 40);
-        
-        setTimeout(() => {
-            generateNewLayout(); // Change geometry on score
-            resetTurn();
-        }, 2000);
+        showMessage("SWISH!", "#06D6A0");
+        createParticles(0, basket.y + 80, basket.z - basket.rimRadius, '#F77F00', 40);
+        setTimeout(resetTurn, 2000);
     }
 
     function resolveMiss() {
@@ -485,11 +437,8 @@
         state.phase = 'RESOLVING';
         state.streak = 0;
         scoreEl.textContent = state.streak;
-        showMessage("MISSED", "#EF476F", false);
-        
-        setTimeout(() => {
-            resetTurn(true); // Keep same angle and layout on miss
-        }, 2000);
+        showMessage("MISSED", "#EF476F");
+        setTimeout(resetTurn, 2000);
     }
 
     /**
@@ -510,58 +459,49 @@
 
     function drawCourtFloor() {
         // Hardwood background
-        ctx.fillStyle = '#C28F59'; // Wood color
+        ctx.fillStyle = '#C28F59';
         
-        // Draw a giant polygon for the visible floor
-        const farLeft = project(-2000, 0, -500);
-        const farRight = project(2000, 0, -500);
-        const nearRight = project(2000, 0, 3000);
-        const nearLeft = project(-2000, 0, 3000);
+        const farLeft = project(-2000, 0, 1500);
+        const farRight = project(2000, 0, 1500);
+        const nearRight = project(2000, 0, -1000);
+        const nearLeft = project(-2000, 0, -1000);
 
         if (farLeft && farRight && nearRight && nearLeft) {
             ctx.beginPath();
-            ctx.moveTo(farLeft.x, farLeft.y);
-            ctx.lineTo(farRight.x, farRight.y);
-            ctx.lineTo(nearRight.x, nearRight.y);
-            ctx.lineTo(nearLeft.x, nearLeft.y);
-            ctx.fill();
+            ctx.moveTo(farLeft.x, farLeft.y); ctx.lineTo(farRight.x, farRight.y);
+            ctx.lineTo(nearRight.x, nearRight.y); ctx.lineTo(nearLeft.x, nearLeft.y); ctx.fill();
         }
 
         const lColor = 'rgba(255,255,255,0.8)';
         
-        // Baseline
-        drawLine(-1000, 0, 1000, 0, lColor, 5);
+        // Baseline (At basket.z)
+        drawLine(-1000, basket.z, 1000, basket.z, lColor, 5);
         
         // Paint (Key)
         const paintWidth = 320;
         const paintLength = 580;
         
-        // Paint Fill
         ctx.fillStyle = '#2A4B7C';
-        const pl = project(-paintWidth/2, 0, 0);
-        const pr = project(paintWidth/2, 0, 0);
-        const pfr = project(paintWidth/2, 0, paintLength);
-        const pfl = project(-paintWidth/2, 0, paintLength);
+        const pl = project(-paintWidth/2, 0, basket.z);
+        const pr = project(paintWidth/2, 0, basket.z);
+        const pfr = project(paintWidth/2, 0, basket.z - paintLength);
+        const pfl = project(-paintWidth/2, 0, basket.z - paintLength);
         
         if (pl && pr && pfr && pfl) {
-            ctx.beginPath();
-            ctx.moveTo(pl.x, pl.y);
-            ctx.lineTo(pr.x, pr.y);
-            ctx.lineTo(pfr.x, pfr.y);
-            ctx.lineTo(pfl.x, pfl.y);
-            ctx.fill();
+            ctx.beginPath(); ctx.moveTo(pl.x, pl.y); ctx.lineTo(pr.x, pr.y);
+            ctx.lineTo(pfr.x, pfr.y); ctx.lineTo(pfl.x, pfl.y); ctx.fill();
         }
 
         // Paint Lines
-        drawLine(-paintWidth/2, 0, -paintWidth/2, paintLength, lColor, 5);
-        drawLine(paintWidth/2, 0, paintWidth/2, paintLength, lColor, 5);
-        drawLine(-paintWidth/2, paintLength, paintWidth/2, paintLength, lColor, 5); // Free throw line
+        drawLine(-paintWidth/2, basket.z, -paintWidth/2, basket.z - paintLength, lColor, 5);
+        drawLine(paintWidth/2, basket.z, paintWidth/2, basket.z - paintLength, lColor, 5);
+        drawLine(-paintWidth/2, basket.z - paintLength, paintWidth/2, basket.z - paintLength, lColor, 5); // Free throw line
 
         // Free Throw Circle
-        drawCircle(0, paintLength, 150, lColor, 5, true);
+        drawCircle(0, basket.z - paintLength, 150, lColor, 5, true);
 
-        // 3-Point Arc (Semicircle)
-        drawCircle(0, 0, state.orbitRadius, lColor, 5, false, true);
+        // 3-Point Arc
+        drawCircle(0, basket.z, state.orbitRadius, lColor, 5, false, true);
     }
 
     function drawCircle(x, z, r, color, width, full = false, is3Pt = false) {
@@ -569,20 +509,13 @@
         ctx.beginPath();
         let started = false;
         
-        // For 3pt line, it has straight sides at the corners
-        const startAng = is3Pt ? -Math.PI/2.2 : 0;
-        const endAng = is3Pt ? Math.PI/2.2 : Math.PI*2;
+        const startAng = is3Pt ? -Math.PI/2 : 0;
+        const endAng = is3Pt ? Math.PI/2 : Math.PI*2;
         
-        if (is3Pt) {
-            const cornerX = r * Math.sin(-Math.PI/2.2);
-            drawLine(cornerX, 0, cornerX, r * Math.cos(-Math.PI/2.2), color, width);
-            const cornerX2 = r * Math.sin(Math.PI/2.2);
-            drawLine(cornerX2, 0, cornerX2, r * Math.cos(Math.PI/2.2), color, width);
-        }
-
         for (let a = startAng; a <= endAng; a += 0.1) {
+            // Semicircle extends in negative Z direction from basket
             const px = x + r * Math.sin(a);
-            const pz = z + r * Math.cos(a);
+            const pz = z - r * Math.cos(a);
             const p = project(px, 0, pz);
             if (p) {
                 if (!started) { ctx.moveTo(p.x, p.y); started = true; }
@@ -594,53 +527,41 @@
     }
 
     function drawBasket() {
-        const hoopY = basket.y + state.hoopHeightOffset;
-        const backP = project(0, hoopY, basket.zOffset);
+        const backP = project(0, basket.y, basket.z);
         if (!backP) return;
 
         // Pole
-        const poleTop = project(0, hoopY + basket.bh, basket.zOffset + 20);
-        const poleBottom = project(0, 0, basket.zOffset + 20);
+        const poleTop = project(0, basket.y + basket.bh, basket.z + 20);
+        const poleBottom = project(0, 0, basket.z + 20);
         if (poleTop && poleBottom) {
-            ctx.strokeStyle = '#4A4E69';
-            ctx.lineWidth = 15 * poleBottom.scale;
-            ctx.beginPath();
-            ctx.moveTo(poleTop.x, poleTop.y);
-            ctx.lineTo(poleBottom.x, poleBottom.y);
-            ctx.stroke();
+            ctx.strokeStyle = '#4A4E69'; ctx.lineWidth = 15 * poleBottom.scale;
+            ctx.beginPath(); ctx.moveTo(poleTop.x, poleTop.y); ctx.lineTo(poleBottom.x, poleBottom.y); ctx.stroke();
         }
 
         // Backboard
         const hw = (basket.bw / 2) * backP.scale;
         const hh = basket.bh * backP.scale;
         
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-        ctx.fillRect(backP.x - hw, backP.y, hw * 2, hh);
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 4 * backP.scale;
-        ctx.strokeRect(backP.x - hw, backP.y, hw * 2, hh);
-        
-        // Inner Square
-        ctx.strokeStyle = '#E63946';
-        ctx.strokeRect(backP.x - hw * 0.4, backP.y + hh * 0.5, hw * 0.8, hh * 0.35);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.7)'; ctx.fillRect(backP.x - hw, backP.y, hw * 2, hh);
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 4 * backP.scale; ctx.strokeRect(backP.x - hw, backP.y, hw * 2, hh);
+        ctx.strokeStyle = '#E63946'; ctx.strokeRect(backP.x - hw * 0.4, backP.y + hh * 0.5, hw * 0.8, hh * 0.35);
 
         // Hoop and Net
-        const rimZ = basket.zOffset + basket.rimRadius;
-        const rimY = hoopY + 70;
+        const rimZ = basket.z - basket.rimRadius;
+        const rimY = basket.y + 70;
         
-        const rimBack = project(0, rimY, basket.zOffset);
-        const rimFront = project(0, rimY, basket.zOffset + basket.rimRadius * 2);
+        const rimBack = project(0, rimY, basket.z);
+        const rimFront = project(0, rimY, basket.z - basket.rimRadius * 2);
         const rimLeft = project(-basket.rimRadius, rimY, rimZ);
         const rimRight = project(basket.rimRadius, rimY, rimZ);
 
         if (rimFront && rimBack && rimLeft && rimRight) {
             const rx = (rimRight.x - rimLeft.x) / 2;
-            const ry = (rimFront.y - rimBack.y) / 2;
-            const cy_rim = rimBack.y + ry;
+            const ry = (rimBack.y - rimFront.y) / 2; // Y is inverted on screen
+            const cy_rim = rimBack.y - ry;
 
             // Net
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-            ctx.lineWidth = 1.5;
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)'; ctx.lineWidth = 1.5;
             const netBottom = project(0, rimY + 50, rimZ);
             if (netBottom) {
                 ctx.beginPath();
@@ -650,58 +571,50 @@
             }
 
             // Rim
-            ctx.strokeStyle = '#E63946';
-            ctx.lineWidth = basket.rimThickness * 2 * rimFront.scale;
-            ctx.beginPath();
-            ctx.ellipse(rimFront.x - rimFront.vx*rimFront.scale, cy_rim, Math.abs(rx), Math.abs(ry), 0, 0, Math.PI * 2);
-            ctx.stroke();
+            ctx.strokeStyle = '#E63946'; ctx.lineWidth = basket.rimThickness * 2 * rimFront.scale;
+            ctx.beginPath(); ctx.ellipse(rimFront.x, cy_rim, Math.abs(rx), Math.abs(ry), 0, 0, Math.PI * 2); ctx.stroke();
         }
     }
 
     function drawPlayer() {
         const px = state.orbitRadius * Math.sin(state.angle);
-        const pz = state.orbitRadius * Math.cos(state.angle);
+        const pz = basket.z - state.orbitRadius * Math.cos(state.angle);
         const p = project(px, 0, pz);
         if (!p) return;
 
+        // Calculate screen angle to face the hoop
+        const hoopBase = project(0, 0, basket.z);
+        let faceAngle = -Math.PI/2; 
+        if (hoopBase) faceAngle = Math.atan2(hoopBase.y - p.y, hoopBase.x - p.x);
+
         ctx.save();
         ctx.translate(p.x, p.y);
+        ctx.rotate(faceAngle + Math.PI/2); // Rotate top-down sprite
         ctx.scale(p.scale, p.scale);
 
-        const skin = '#8D5524', jersey = '#FFD166', shorts = '#118AB2', shoes = '#fff';
+        const skin = '#8D5524', jersey = '#FFD166';
 
-        // Legs
-        ctx.fillStyle = skin;
-        ctx.fillRect(-15, -60, 10, 60); ctx.fillRect(5, -60, 10, 60);
-
-        // Shorts & Torso
-        ctx.fillStyle = shorts;
-        ctx.fillRect(-20, -100, 18, 50); ctx.fillRect(-2, -100, 18, 50); ctx.fillRect(-20, -110, 36, 20);
+        // Shoulders (Top down)
+        ctx.fillStyle = jersey; ctx.beginPath(); ctx.ellipse(0, 0, 25, 12, 0, 0, Math.PI*2); ctx.fill();
         
-        ctx.fillStyle = jersey;
-        ctx.beginPath(); ctx.moveTo(-22, -110); ctx.lineTo(18, -110); ctx.lineTo(15, -170); ctx.lineTo(-19, -170); ctx.fill();
-        
-        ctx.fillStyle = '#EF476F'; ctx.font = 'bold 30px Arial'; ctx.textAlign = 'center'; ctx.fillText('23', -2, -125);
+        // Number on back
+        ctx.fillStyle = '#EF476F'; ctx.font = 'bold 16px Arial'; ctx.textAlign = 'center'; 
+        ctx.save(); ctx.rotate(Math.PI); ctx.fillText('23', 0, 6); ctx.restore();
 
         // Head
-        ctx.fillStyle = skin;
-        ctx.beginPath(); ctx.arc(-2, -185, 15, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = '#fff'; ctx.fillRect(-16, -195, 28, 5); // Headband
+        ctx.fillStyle = skin; ctx.beginPath(); ctx.arc(0, -6, 12, 0, Math.PI*2); ctx.fill();
 
-        // Arms
-        ctx.strokeStyle = skin; ctx.lineWidth = 10; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        // Arms reaching forward
+        ctx.strokeStyle = skin; ctx.lineWidth = 7; ctx.lineCap = 'round';
         ctx.beginPath();
         if (state.phase === 'AIMING') {
-            ctx.moveTo(-18, -165); ctx.lineTo(-30, -130); ctx.lineTo(-5, -120);
-            ctx.moveTo(14, -165); ctx.lineTo(26, -130); ctx.lineTo(10, -120);
+            ctx.moveTo(-20, 0); ctx.lineTo(-12, -25);
+            ctx.moveTo(20, 0); ctx.lineTo(12, -25);
         } else {
-            ctx.moveTo(-18, -165); ctx.lineTo(-10, -220);
-            ctx.moveTo(14, -165); ctx.lineTo(5, -220);
+            ctx.moveTo(-20, 0); ctx.lineTo(-8, -40);
+            ctx.moveTo(20, 0); ctx.lineTo(8, -40);
         }
         ctx.stroke();
-
-        ctx.fillStyle = shoes;
-        ctx.beginPath(); ctx.ellipse(-10, -5, 12, 6, 0, 0, Math.PI*2); ctx.ellipse(10, -5, 12, 6, 0, 0, Math.PI*2); ctx.fill();
 
         ctx.restore();
     }
@@ -713,13 +626,9 @@
         const sr = ball.radius * p.scale;
         ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(ball.rotation);
 
-        ctx.fillStyle = '#F77F00';
-        ctx.beginPath(); ctx.arc(0, 0, sr, 0, Math.PI * 2); ctx.fill();
-
+        ctx.fillStyle = '#F77F00'; ctx.beginPath(); ctx.arc(0, 0, sr, 0, Math.PI * 2); ctx.fill();
         ctx.strokeStyle = '#2B2D42'; ctx.lineWidth = Math.max(1, 1.5 * p.scale);
         ctx.beginPath(); ctx.moveTo(0, -sr); ctx.lineTo(0, sr); ctx.moveTo(-sr, 0); ctx.lineTo(sr, 0); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(-sr*0.7, -sr*0.7); ctx.quadraticCurveTo(0, 0, -sr*0.7, sr*0.7); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(sr*0.7, -sr*0.7); ctx.quadraticCurveTo(0, 0, sr*0.7, sr*0.7); ctx.stroke();
         
         const grad = ctx.createRadialGradient(-sr/3, -sr/3, 1, 0, 0, sr);
         grad.addColorStop(0, 'rgba(255,255,255,0.3)'); grad.addColorStop(1, 'rgba(0,0,0,0.5)');
@@ -745,7 +654,7 @@
         const forwardVel = (state.power / 100) * 45;
         let tvy = -(state.power / 100) * 32 - 6;
         let tvx = -forwardVel * Math.sin(state.angle);
-        let tvz = -forwardVel * Math.cos(state.angle);
+        let tvz = forwardVel * Math.cos(state.angle);
         
         const pStart = project(tx, ty, tz);
         if(pStart) ctx.moveTo(pStart.x, pStart.y);
@@ -775,13 +684,16 @@
         
         drawCourtFloor();
         
+        const px = state.orbitRadius * Math.sin(state.angle);
+        const pz = basket.z - state.orbitRadius * Math.cos(state.angle);
+        
         const entities = [
-            { z: project(state.orbitRadius * Math.sin(state.angle), 0, state.orbitRadius * Math.cos(state.angle))?.z || 0, draw: drawPlayer },
-            { z: project(0, basket.y, basket.zOffset)?.z || 0, draw: drawBasket },
+            { z: project(px, 0, pz)?.z || 0, draw: drawPlayer },
+            { z: project(0, basket.y, basket.z)?.z || 0, draw: drawBasket },
             { z: project(ball.x, ball.y, ball.z)?.z || 0, draw: drawBall }
         ];
 
-        entities.sort((a, b) => b.z - a.z);
+        entities.sort((a, b) => b.z - a.z); // Sort ascending (farthest first)
 
         if (state.phase === 'AIMING') drawTrajectoryGuide();
         entities.forEach(ent => ent.draw());
